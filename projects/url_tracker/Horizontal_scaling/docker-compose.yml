@@ -1,0 +1,76 @@
+# Lab 2 - Horizontal Scaling
+# ============================================================
+# Starts 4 containers on one private Docker network:
+#
+#   nginx     → load balancer, exposed at localhost:5000
+#   server_a  → app instance 1 (internal only)
+#   server_b  → app instance 2 (internal only)
+#   server_c  → app instance 3 (internal only)
+#
+# All 3 app servers share ONE database via a Docker named volume.
+#
+# Commands:
+#   Start:   docker compose up --build
+#   Stop:    docker compose down
+#   Logs:    docker compose logs -f
+#   Status:  docker compose ps
+# ============================================================
+
+services:
+
+  server_a:
+    build: .
+    container_name: server_a
+    environment:
+      - PORT=5000
+      - DB_PATH=/data/links.db
+      - SERVER_NAME=server_a
+    volumes:
+      - db_data:/data          # shared volume — all 3 servers see the same DB
+    networks:
+      - linktrack_net
+
+  server_b:
+    build: .
+    container_name: server_b
+    environment:
+      - PORT=5000
+      - DB_PATH=/data/links.db
+      - SERVER_NAME=server_b
+    volumes:
+      - db_data:/data          # same volume as server_a
+    networks:
+      - linktrack_net
+
+  server_c:
+    build: .
+    container_name: server_c
+    environment:
+      - PORT=5000
+      - DB_PATH=/data/links.db
+      - SERVER_NAME=server_c
+    volumes:
+      - db_data:/data          # same volume as server_b
+    networks:
+      - linktrack_net
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx_lb
+    ports:
+      - "5000:80"              # expose ONLY nginx to your laptop on port 5000
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - server_a
+      - server_b
+      - server_c
+    networks:
+      - linktrack_net
+
+volumes:
+  db_data:                     # Docker-managed shared volume for links.db
+
+networks:
+  linktrack_net:
+    driver: bridge             # private network — containers talk by service name

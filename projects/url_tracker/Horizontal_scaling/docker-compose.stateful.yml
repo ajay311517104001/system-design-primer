@@ -1,0 +1,74 @@
+# Phase 1 — STATEFUL (Broken) Setup
+# ============================================================
+# Each server has its OWN isolated database inside its container.
+# There is NO shared volume between server_a, server_b, server_c.
+#
+# What you will observe:
+#   POST /shorten to nginx (port 5000)
+#     → nginx routes to server_a → server_a writes to ITS OWN links.db
+#
+#   GET /<code> to nginx (port 5000)
+#     → nginx routes to server_b or server_c
+#     → their links.db is EMPTY → 404 not found
+#
+# This is the stateful server problem.
+# State (data) is trapped inside one container.
+# The other containers have no knowledge of it.
+#
+# Run:  docker compose -f docker-compose.stateful.yml up --build
+# Stop: docker compose -f docker-compose.stateful.yml down
+# ============================================================
+
+services:
+
+  server_a:
+    build: .
+    container_name: server_a
+    environment:
+      - PORT=5000
+      - DB_PATH=/app/links.db   # /app exists (Dockerfile WORKDIR) — /data does NOT without a volume
+      - SERVER_NAME=server_a
+    # NO volume mount — each container's /app/links.db is private to itself
+    networks:
+      - linktrack_net
+
+  server_b:
+    build: .
+    container_name: server_b
+    environment:
+      - PORT=5000
+      - DB_PATH=/app/links.db   # completely separate file from server_a
+      - SERVER_NAME=server_b
+    networks:
+      - linktrack_net
+
+  server_c:
+    build: .
+    container_name: server_c
+    environment:
+      - PORT=5000
+      - DB_PATH=/app/links.db   # completely separate file from server_a and server_b
+      - SERVER_NAME=server_c
+    networks:
+      - linktrack_net
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx_lb
+    ports:
+      - "5000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - server_a
+      - server_b
+      - server_c
+    networks:
+      - linktrack_net
+
+# No named volumes declared here — that is intentional.
+# Each container's filesystem is private and isolated.
+
+networks:
+  linktrack_net:
+    driver: bridge
