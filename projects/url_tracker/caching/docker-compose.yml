@@ -1,0 +1,100 @@
+# Lab 3 - Caching
+# ============================================================
+# Adds Redis to the horizontal scaling setup.
+# Architecture:
+#
+#   nginx      → load balancer         :5000 (exposed)
+#   server_a   → app instance 1        (internal)
+#   server_b   → app instance 2        (internal)
+#   server_c   → app instance 3        (internal)
+#   redis      → shared cache          (internal)
+#
+# All 3 app servers share:
+#   db_data  volume → one SQLite DB   (writes go here)
+#   redis container → one cache       (reads served from here)
+#
+# Commands:
+#   Start:  docker compose up --build
+#   Stop:   docker compose down
+#   Logs:   docker compose logs -f
+#   Stats:  GET http://localhost:5000/cache/stats
+# ============================================================
+
+services:
+
+  # ── Redis — shared distributed cache ────────────────────────────────────────
+  # redis:7-alpine is ~30MB. Listens on port 6379 internally.
+  # Not exposed to the host machine — only app servers need it.
+  # allkeys-lru: when memory is full, evict the least recently used key.
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - linktrack_net
+
+  server_a:
+    build: .
+    container_name: server_a
+    environment:
+      - PORT=5000
+      - DB_PATH=/data/links.db
+      - SERVER_NAME=server_a
+      - REDIS_URL=redis://redis_cache:6379   # ← points to Redis container by name
+    volumes:
+      - db_data:/data
+    depends_on:
+      - redis
+    networks:
+      - linktrack_net
+
+  server_b:
+    build: .
+    container_name: server_b
+    environment:
+      - PORT=5000
+      - DB_PATH=/data/links.db
+      - SERVER_NAME=server_b
+      - REDIS_URL=redis://redis_cache:6379
+    volumes:
+      - db_data:/data
+    depends_on:
+      - redis
+    networks:
+      - linktrack_net
+
+  server_c:
+    build: .
+    container_name: server_c
+    environment:
+      - PORT=5000
+      - DB_PATH=/data/links.db
+      - SERVER_NAME=server_c
+      - REDIS_URL=redis://redis_cache:6379
+    volumes:
+      - db_data:/data
+    depends_on:
+      - redis
+    networks:
+      - linktrack_net
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx_lb
+    ports:
+      - "5000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - server_a
+      - server_b
+      - server_c
+    networks:
+      - linktrack_net
+
+volumes:
+  db_data:
+
+networks:
+  linktrack_net:
+    driver: bridge
